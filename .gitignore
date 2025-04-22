@@ -1,0 +1,19 @@
+# Ignore venv and Python cache
+venv/
+__pycache__/
+*.pyc
+
+# Ignore model/data
+*.h5
+*.zip
+*.png
+*.jpg
+*.jpeg
+
+# Ignore Jupyter stuff
+.ipynb_checkpoints/
+
+# Ignore system/editor files
+.DS_Store
+.idea/
+.vscode/
