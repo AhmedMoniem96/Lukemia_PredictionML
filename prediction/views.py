@@ -1,52 +1,50 @@
+import os
+import numpy as np
+import gdown
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
-from .serializers import RegisterSerializer, MedicalImageSerializer
-from .models import CustomUser, MedicalImage
-
-import numpy as np
-import os
-import requests
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 
-# -----------------------------------
-# 🔽 Google Drive Model Download
-# -----------------------------------
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU use
+from .models import MedicalImage, CustomUser
+from .serializers import MedicalImageSerializer, RegisterSerializer
 
-GOOGLE_DRIVE_FILE_ID = '1Ak-FBeJrJPaecD15hMScwZpAM7JEVSMN'
-MODEL_FILENAME = 'leukemia_cnn_model.h5'
-MODEL_DIR = os.path.join(os.path.dirname(__file__), 'ml_model')
-MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)
+# Prevent TensorFlow from using GPU
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-def download_model_from_drive():
-    if not os.path.exists(MODEL_PATH):
-        print("🔽 Downloading model from Google Drive...")
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        url = f"https://drive.google.com/uc?export=download&id={GOOGLE_DRIVE_FILE_ID}"
-        response = requests.get(url)
-        with open(MODEL_PATH, 'wb') as f:
-            f.write(response.content)
-        print("✅ Model downloaded successfully!")
+model = None  # Global model reference
 
-download_model_from_drive()
-model = load_model(MODEL_PATH)
+def ensure_model_loaded():
+    global model
+    model_path = os.path.join(os.path.dirname(__file__), 'ml_model', 'leukemia_cnn_model.h5')
+
+    if not os.path.exists(model_path):
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        gdown.download(
+            'https://drive.google.com/uc?id=1Ak-FBeJrJPaecD15hMScwZpAM7JEVSMN',
+            model_path,
+            quiet=False
+        )
+
+    if model is None:
+        model = load_model(model_path)
+
 class_names = ['ALL-Infected', 'Beginning', 'Healthy', 'Pre-leukemia']
 
-# -----------------------------------
-# 🔍 Predict API
-# -----------------------------------
 class PredictAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
+        ensure_model_loaded()
+
         serializer = MedicalImageSerializer(data=request.data)
         if serializer.is_valid():
             instance = serializer.save()
+
             img_path = instance.image.path
             img = image.load_img(img_path, target_size=(224, 224))
             img_array = image.img_to_array(img) / 255.0
@@ -64,16 +62,14 @@ class PredictAPIView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -----------------------------------
-# 👤 Register API
-# -----------------------------------
 class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
             token, _ = Token.objects.get_or_create(user=user)
-            return Response({
+
+            response_data = {
                 "token": token.key,
                 "user": {
                     "id": user.id,
@@ -81,12 +77,10 @@ class RegisterView(APIView):
                     "full_name": user.full_name,
                     "phone_number": user.phone_number,
                 }
-            }, status=status.HTTP_201_CREATED)
+            }
+            return Response(response_data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -----------------------------------
-# 🔐 Login API
-# -----------------------------------
 class LoginView(APIView):
     def post(self, request):
         email = request.data.get("email")
